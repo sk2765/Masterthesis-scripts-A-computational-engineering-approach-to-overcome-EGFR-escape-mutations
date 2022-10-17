@@ -1,0 +1,228 @@
+<ROSETTASCRIPTS>
+
+    <SCOREFXNS>
+		# https://www.rosettacommons.org/docs/latest/scripting_documentation/RosettaScripts/RosettaScripts#rosettascript-sections_scorefunctions
+		<ScoreFunction name="r15" weights="ref2015" />
+    </SCOREFXNS>
+
+    <RESIDUE_SELECTORS>
+		# Documentation of selectors at: https://www.rosettacommons.org/docs/latest/scripting_documentation/RosettaScripts/ResidueSelectors/ResidueSelectors (January 2021)
+
+		# Define selectors chain_A and chain_B, that refer only to the residues on the respective chain. 
+		<Chain name="chain_L" chains="L"/>
+		<Chain name="chain_H" chains="H"/>
+		<Chain name="chain_LH" chains="L,H"/>
+		<Chain name="chain_A" chains="A"/>
+		<Or name="everything" selectors="chain_LH,chain_A"/>
+
+		# Define Neigborhoods aka regions at the interface dependent on distance
+		<Neighborhood name="interface_L" selector="chain_L" distance="8.0"/>
+		<Neighborhood name="interface_H" selector="chain_H" distance="8.0"/>
+    	<Or name="interface_LH" selectors="interface_L, interface_H"/>
+		<Neighborhood name="interface_A" selector="chain_A" distance="8.0"/>
+		<And name="interface_LH_A" selectors="interface_LH,interface_A"/>
+
+		# Select interface residues by c_a - c_b vectors (side chain aligned in the gap)
+		<InterfaceByVector name="interface_scH" cb_dist_cut="11" nearby_atom_cut="5.5" vector_angle_cut="75.0" vector_dist_cut="9" grp1_selector="chain_A" grp2_selector="chain_H"/>
+		<InterfaceByVector name="interface_scL" cb_dist_cut="11" nearby_atom_cut="5.5" vector_angle_cut="75.0" vector_dist_cut="9" grp1_selector="chain_A" grp2_selector="chain_L"/>
+		<Or name="interface_sc" selectors="interface_scH, interface_scL"/> 
+
+		<And name="positions_LH" selectors="interface_sc,interface_LH_A,chain_LH"/>
+		<And name="positions_A" selectors="interface_sc,interface_LH_A,chain_A"/>
+
+		# Select residues next to sc-oriented residues (5 residue neighbors)
+		<PrimarySequenceNeighborhood name="environment_LH" selector="positions_LH" lower="3" upper="3" />
+		<PrimarySequenceNeighborhood name="environment_A" selector="positions_A" lower="3" upper="3" />
+
+		# Define interface region as combination of both environments
+		<Or name="interface" selectors="environment_LH,environment_A"/>
+
+		# Select rest of the proteins that is not part of the interface
+		<Not name="rest" selector="interface"/>
+
+		# Some logical selectors
+		<Not name="not_positions_LH" selector="positions_LH"/>
+		<Not name="not_environment_LH" selector="environment_LH"/>
+    	</RESIDUE_SELECTORS>
+
+    <RESIDUE_LEVEL_TASK_OPERATIONS>
+		# Documentation: https://www.rosettacommons.org/docs/latest/scripting_documentation/RosettaScripts/TaskOperations/taskoperations_pages/Residue-Level-TaskOperations (January 2021)
+		# Turns off design and repacking
+        <PreventRepackingRLT name="PreventRepacking" />
+		# turns off design
+        <RestrictToRepackingRLT name="RestrictToRepacking" />
+    </RESIDUE_LEVEL_TASK_OPERATIONS>
+
+    <TASKOPERATIONS>
+		# Documentation: https://www.rosettacommons.org/docs/latest/scripting_documentation/RosettaScripts/TaskOperations/TaskOperations-RosettaScripts
+		# Task operations contorl the packer, specify which residue to repack and/or design, and how to do it 
+
+		# Set lazy memory Interaction Graph
+		<SetIGType name="lazymem" lazy_ig="true"/>
+
+		# Enable command line options
+		<InitializeFromCommandline name="init" />
+
+		# Includes rotamers from Input PDB for the first packing event
+		<IncludeCurrent name="current" />
+
+		# Prevents chi 2 rotamers far from 90 degree of aromatic residues
+		<LimitAromaChi2 name="limitchi" chi2max="110" chi2min="70" include_trp="True" />
+
+		# During packing, increase sampling by using extra rotamers
+		<ExtraRotamersGeneric name="ex1_ex2" ex1="1" ex2aro="1" />
+        <ExtraRotamersGeneric name="ex1" ex1="1" />
+
+		# Only Design Positions and pack interface region
+		# 1. defines the aa which can be used for design
+		# 2. positions in the interface but not with the right orientation and distance are restricted to be repacked
+		# 3. postions which are not in the interface are prevented from repacking
+		<DesignRestrictions name="f_design">
+	    	<Action residue_selector="positions_LH" aas="ADEFGHIKLMNPQRSTVWY"/>
+	    	<Action residue_selector="not_positions_LH" residue_level_operations="RestrictToRepacking"/>
+	    	<Action residue_selector="rest" residue_level_operations="PreventRepacking"/>
+		</DesignRestrictions> 
+	
+    </TASKOPERATIONS>
+
+    <MOVE_MAP_FACTORIES>
+		# movemap contorls the minimizer
+		# 1. allows side chain (chi) movement but no backbone (bb) movement   
+		# 2. allow backbone movement for interface region
+		# Define a MoveMap that allows bakcbone torsion for the interface region
+		<MoveMapFactory name="bbforinterface" bb="0" chi="1">
+	  	  <Backbone residue_selector="interface"/>
+		</MoveMapFactory>
+    </MOVE_MAP_FACTORIES>
+
+    <SIMPLE_METRICS>
+		# Calculates interaction scores
+		<InteractionEnergyMetric name="i_score" residue_selector="chain_LH" residue_selector2="chain_A" />
+	
+		# Calculates total energy of chain LH
+		<TotalEnergyMetric name="total_energy_LH" residue_selector="chain_LH"/>
+
+        # Calculates total energy of chain A
+        <TotalEnergyMetric name="total_energy_A" residue_selector="chain_A"/>
+
+		# RMSD calculation Input vs. Output for chain LH
+		<RMSDMetric name="rmsd_LH" reference_name="input_structure" residue_selector="chain_LH" super="true" rmsd_type="rmsd_protein_bb_ca"/>
+        
+        # RMSD calculation Input vs Output for chain LH environment
+		<RMSDMetric name="rmsd_env_LH" reference_name="input_structure" residue_selector="environment_LH" super="true" rmsd_type="rmsd_protein_bb_ca"/>
+
+		# RMSD calculation Input vs Output for chain A environment
+        <RMSDMetric name="rmsd_env_A" reference_name="input_structure" residue_selector="environment_A" super="true" rmsd_type="rmsd_protein_bb_ca"/>
+
+		# Print designable residues
+		<SelectedResiduesMetric name="designed_residues" residue_selector="positions_LH"/>
+
+		# Print backbone movement environment
+		<SelectedResiduesMetric name="environment" residue_selector="interface"/>
+
+    </SIMPLE_METRICS>
+
+    <MOVERS>
+		# Documentation: https://www.rosettacommons.org/docs/latest/scripting_documentation/RosettaScripts/Movers/Movers-RosettaScripts
+
+		<DockSetupMover name="docksetup" />
+
+		<DockingInitialPerturbation randomize1="0" randomize2="0" dock_pert="1" trans="3" rot="8" spin="1" slide="1" name="dockpert" />
+
+		# Performs Protein-Protein Docking
+		# partners: example: docking chains L+H with A is partners="LH_A"
+		<DockingProtocol name="docking" low_res_protocol_only="0" docking_local_refine="0" dock_min="1" partners="A_LH" task_operations="ex1_ex2,init,current,limitchi,lazymem"/>
+
+		# Adds label to all residues to be designed (just for debug)
+		<AddResidueLabel name="pos_LH" residue_selector="positions_LH" label="Positions_LH" />
+
+		# Fast Design protocol using previously defined taskoperations and movemaps
+     	<FastDesign name="FastDesign" repeats="2" task_operations="init,current,limitchi,f_design,lazymem,ex1_ex2" min_type="dfpmin_armijo_nonmonotone" movemap_factory="bbforinterface" >
+	    	<MoveMap name="MM" >
+                <Jump number="1" setting="true" />
+            </MoveMap>
+        </FastDesign>
+
+		# Fast Relax protocol using previously defined taskoperations and movemaps
+		<FastRelax name="FastRelax" repeats="1" min_type="dfpmin_armijo_nonmonotone" task_operations="limitchi,f_design,lazymem,ex1_ex2" movemap_factory="bbforinterface">
+	    	<MoveMap name="MM" >
+                <Jump number="1" setting="true" />
+            </MoveMap>
+		</FastRelax>
+
+		# Save starting pose for comparison
+		<SavePoseMover name="save_input" restore_pose="0" reference_name="input_structure"/>
+        	
+		# calculates binding energies, buried interface surface areas, and other useful interface metrics before and after Relax
+        <InterfaceAnalyzerMover name="interface_pre_relax" scorefxn="r15" pack_separated="true" pack_input="true" packstat="true" interface_sc="true" interface="HL_A" scorefile_reporting_prefix="prerelax"/>
+		<InterfaceAnalyzerMover name="interface_post_relax" scorefxn="r15" pack_separated="true" pack_input="true" packstat="true" interface_sc="true" interface="HL_A" scorefile_reporting_prefix="postrelax"/>
+
+		# Saves interaction scores after certain movers
+		<RunSimpleMetrics name="metrics_postdock" metrics="i_score" suffix="_postdock"/>
+		<RunSimpleMetrics name="metrics_postdesign" metrics="i_score" suffix="_postdesign"/>
+		<RunSimpleMetrics name="metrics_postrelax1" metrics="i_score" suffix="_postrelax_1"/>
+		<RunSimpleMetrics name="metrics_postrelax2" metrics="i_score" suffix="_postrelax_2"/>
+
+		# Save total energies of chain LH
+		<RunSimpleMetrics name="starting_energy_LH" metrics="total_energy_LH" suffix="_starting_LH"/>
+		<RunSimpleMetrics name="final_energy_LH" metrics="total_energy_LH" suffix="_final_LH"/>
+
+        # Save total energies of chain A
+        <RunSimpleMetrics name="starting_energy_A" metrics="total_energy_A" suffix="_starting_A"/>
+        <RunSimpleMetrics name="final_energy_A" metrics="total_energy_A" suffix="_final_A"/>      
+
+		#  Perform RMSD calculation for chain LH
+		<RunSimpleMetrics name="calculate_rmsd_LH" metrics="rmsd_LH" suffix="_LH_metric"/>
+
+        #  Perform RMSD calculation for environment LH
+        <RunSimpleMetrics name="calculate_rmsd_env_LH" metrics="rmsd_env_LH" suffix="_env_LH_metric"/>
+
+        #  Perform RMSD calculation for environment A
+        <RunSimpleMetrics name="calculate_rmsd_env_A" metrics="rmsd_env_A" suffix="_env_A_metric"/>
+
+		# Print designable residues in scorefile
+		<RunSimpleMetrics name="print_residues" metrics="designed_residues" suffix="_positions_LH"/>
+	
+		# Print interface residues in scorefile
+		<RunSimpleMetrics name="print_interface" metrics="environment" suffix="_environment"/>
+
+    </MOVERS>
+
+    <FILTERS>
+		<SimpleMetricFilter name="i_sc_PostDock" metric="i_score" cutoff="-20" comparison_type="lt_or_eq" />
+		<SimpleMetricFilter name="i_sc_PostDesign" metric="i_score" cutoff="0" comparison_type="lt_or_eq" />
+		<SimpleMetricFilter name="i_sc_PostRelax" metric="i_score" cutoff="0" comparison_type="lt_or_eq" />
+		<ScoreType name="total_score" score_type="total_score" threshold="0" confidence="1.0" />
+    </FILTERS>
+
+    <PROTOCOLS>
+		<Add mover="save_input"/>
+		<Add mover="starting_energy_LH"/>
+		<Add mover="starting_energy_A"/>
+		Add mover="pos" />
+		Add mover="docksetup" />
+		Add mover="dockpert" />
+		Add mover="docking" />
+		<Add mover="metrics_postdock"/>
+		Add filter="i_sc_PostDock"/>
+		<Add mover="interface_pre_relax"/>
+		<Add mover="FastRelax"/>
+		<Add mover="metrics_postrelax1"/>
+		<Add mover="interface_post_relax"/>
+		Add mover="FastDesign"/>
+		Add mover="metrics_postdesign"/>
+		Add filter="i_sc_PostDesign"/>
+		Add mover="FastRelax"/>
+		Add mover="metrics_postrelax2"/>
+		<Add mover="calculate_rmsd_LH"/>
+        <Add mover="calculate_rmsd_env_LH"/>
+        <Add mover="calculate_rmsd_env_A"/>
+		<Add mover="final_energy_LH"/>
+        <Add mover="final_energy_A"/>
+		Add mover="print_residues"/>
+		<Add mover="print_interface"/>
+		Add filter="i_sc_PostRelax"/>
+		Add filter="total_score"/>
+    </PROTOCOLS>
+    <OUTPUT scorefxn="r15" />
+</ROSETTASCRIPTS>
